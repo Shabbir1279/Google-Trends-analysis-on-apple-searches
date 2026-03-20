@@ -1,0 +1,226 @@
+---
+title: "MTH6139 Time Series" 
+subtitle: "Coursework 1_221114689 " 
+author: "Shabbir Ahmed" 
+date: "Spring term 2026" 
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: spacelab 
+    highlight: tango
+---
+```{r, echo=FALSE}
+# This code will display the QMUL logo at the top right of the page
+# Do not change this code
+htmltools::img(src = knitr::image_uri("images/QMlogo.png"),
+               alt = 'logo',
+               style = 'position:absolute; top:0; right:0; padding:10px; width:20%;')
+```
+
+```{r include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(prophet)
+library(zoo)
+library(forecast)
+library(lubridate)
+```
+
+# 1. Introduction
+
+The aim of this project is to use Meta's Prophet model in R to analyse a time series dataset and produce forecasts. Time series analysis is used to study data seen over time, enabling patterns such as trends and seasonality to be identified.
+
+This project uses monthly Google Trends data for the global search term "apple", covering a certain period which is from January 2004 to March 2026. Prophet is a forecasting model developed by Meta that breaks down a time series into important components like trend and seasonality, making it suitable to predict real world data with recurring patterns
+
+In this report, the dataset is explored first and formatted according to Prophet's requirements. Then the data is analysed to determine its trend and seasonal behaviour before applying the Prophet model to create forecasts and assess how well it captures the strucure of the series.
+
+
+# 2. Dataset
+```{r}
+Apple_data <- read_csv("Apple data.csv")
+head(Apple_data)
+tail(Apple_data)
+summary(Apple_data)
+```
+ 
+```{r}
+Apple_data <- Apple_data %>%
+  mutate(Time = as.Date(Time, format = "%d/%m/%Y"))
+```
+
+The data set contains 267 observations and 2 variables. The Google Trends index for the search phrase "apple" is contained in the apple column, while the Time column represents monthly dates. 
+
+Also, the summary statistics show that the values range from 18 to 100, with an average of roughly 39.51. The first and third quartiles are 33 and 46 respectively. The median is 38. This indicates that the majority of the data is concentrated between 33 and 46, with some higher values ranging up to 100.
+ 
+
+## 2.1 Preparing the Data for Prophet
+
+Prophet requires the data to be kept in a dataframe with two columns named ds and y. The dates are in the ds column and the observed values are in the y column. Therefore, I transform the original dataset into the format shown below.
+
+```{r}
+Apple_prophet <- Apple_data %>%
+  transmute(
+    ds = Time,
+    y = apple
+  )
+
+head(Apple_prophet)
+tail(Apple_prophet)
+```
+
+
+## 2.2 Analysing Data
+
+Prior to fitting the Prophet model, it is useful to examine the series key Characteristics. As this helps determine whethere there is an overall trend, seasonal movement or irregular variation
+
+### 2.2.1 Linear Regression
+
+```{r}
+Apple_prophet <- Apple_prophet %>%
+  mutate(time_index = 1:n())
+
+linear_model <- lm(y ~ time_index, data = Apple_prophet)
+summary(linear_model)
+```
+
+```{r}
+ggplot(Apple_prophet, aes(x = ds, y = y)) +
+  geom_line() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Apple Data with Linear Trend",
+    x = "Date",
+    y = "Google Trends Index"
+  )
+```
+
+The linear regression provides a simple summary of the long-run movement in the series. The fitted line helps show whether search interest is generally increasing, decreasing, or remaining stable over time.
+
+In this case the time variable's estimated coefficient (time_index) is positive, indicating an upward trend.This means interest in "apple" on Google Trends has generally increased throughout the sample period
+
+The p-value associated with this coefficient is extremely low indicates that the trend is statistically significant and unlikely to be due to random variation
+
+The Multiple R-squared value is approximately 0.5344, which indicates that the variation in the data is explained by the linear trend. This implies that the trend captures a significant part of the movement in the series even while some variation remains unexplained.
+
+Overall, while the linear trend is important, additional factors like seasonality and irregular fluctuations should be taken into account while modelling the series
+
+
+
+### 2.2.2 Plot of the Data
+
+```{r}
+ggplot(Apple_prophet, aes(x = ds, y = y)) +
+  geom_line() +
+  labs(
+    title = "Monthly Google Trends Data for 'apple'",
+    x = "Date",
+    y = "Google Trends Index"
+  )
+```
+
+This time series plot shows how the Google Trends index for "apple" changes over time. The data clearly displays an upward trend with values rising from the early years to more current periods. Also, there are visible fluctuations in the series suggesting the existence of seasonal patterns. Additionally, there are distinct spikes, particularly starting in 2015 onwards, and reaching high values in 2020 as well. Overall, this implies that the series is influenced by both short term variations and long term growth.
+
+
+### 2.2.3 Time Series Decomposition
+```{r}
+apple_ts <- ts(Apple_data$apple, start = c(2004, 1), frequency = 12)
+
+plot(apple_ts, main = "Apple Time Series", ylab = "Google Trends Index", xlab = "Year")
+```
+
+```{r}
+apple_decomposition <- decompose(apple_ts, type = "additive")
+plot(apple_decomposition)
+```
+
+The decomposition breaks the series into trend, seasonal and irregular component making it significantly easier to understand the fundamental structure of the data. The trend component shows general upward movement in interest over time.
+The seasonal component shows repeating patterns throughout the year, indicating that certain months are typically more or less popular for searches.
+The irregular component represents random fluctuations that cannot be explained by seasonality or trend.
+Overall, the decomposition shows that both seasonal effects and trends are important features of the series.
+
+
+### 2.2.4 Seasonality Analysis
+
+```{r}
+monthplot(apple_ts, main = "Month Plot for Apple Time Series")
+```
+
+```{r}
+seasonal_means <- aggregate(apple ~ month(Time, label = TRUE), data = Apple_data, mean)
+seasonal_means
+```
+
+```{r}
+ggplot(seasonal_means, aes(x = `month(Time, label = TRUE)`, y = apple, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Average Monthly Seasonality",
+    x = "Month",
+    y = "Average Google Trends Index"
+  )
+```
+
+The seasonality analysis shows recurring patterns in the data to determine whether some months regularly have greater values than others. Strong annual seasonality is confirmed by the average seasonal values and month plot as it shows clear differences across months. September in particular shows a noticeable increase, which likely reflects higher search interest due to introduction of new products. These patterns show that the user behaviour varies throughout the year, which is a crucial factor to consider when forecasting future values.
+
+
+# 3. Prophet
+
+## 3.1 Prophet Model
+
+
+```{r message=FALSE}
+model_prophet <- prophet(Apple_prophet)
+```
+
+```{r}
+future <- make_future_dataframe(model_prophet, periods = 12, freq = "month")
+forecast <- predict(model_prophet, future)
+```
+
+
+
+
+## 3.2 Forecast Plot
+
+```{r}
+plot(model_prophet, forecast)
+```
+
+This forecast plot shows the historical data combined with the predicted future values. 
+In the plot , the black dots represent observed data points in the data set. 
+The blue line represents the models estimated values which comprise both the fitted values for the historical data and the forecast for future periods.
+The light blue shaded area represents the uncertainty level around the forecast.
+
+The majority of the observed data point lie within the uncertainty level, indicating that the model provides a reasonable fit to the data. The plot also reveals that the series has an overall trend over time along with recurring oscillations that point to seasonal behaviour.
+
+
+The forecast suggests that this overall trend is expected to continue, with the values staying at a comparatively high level and following a similar structure to the historical data.
+
+## 3.3 Prophet Components
+
+```{r}
+prophet_plot_components(model_prophet, forecast)
+```
+
+The component plots show the trend and seasonal effects used by the Prophet model. The trend shows a distinct upward movement over time, suggesting growing interest in "apple". The seasonal component shows recurring yearly trends, with certain periods continuously being higher or lower than others. Overall, both trend and seasonality are crucial in explaining the behaviour of the series and enhancing forecast.
+
+
+# 4. Conclusion
+
+In this project, monthly Google Trends data for the search term "apple" was examined using both classical time series techniques and Meta's Prophet model in R. The data set was first examined using summary statistics and visualisations, then its structure was studied through regression, decomposition and seasonality analysis.
+
+The results display a clear upward trend and strong seasonal patterns with repeating fluctuations through the year. Linear regression verified that the trend is statistically significant while decomposition and seasonal analysis revealed similar annual behaviour.
+
+The Prophet Model perfectly captured both trend and seasonality producing forecasts that closely mirror the data's historical pattern. Overall, the analysis shows that Prophet is useful and efficient tool for forecasting and modelling time series data with both trend and seasonal components.
+
+Finally, it's critical to note that Apple is a global technology company known for electronic products such as a Mac, iphone and ipad. This helps explain the significant and repeating search interest observed in the data. Especially during times of product releases and announcements.
+
+
+# References
+- Dataset: <https://trends.google.com/explore?q=apple&date=all&geo=Worldwide>
+- Prophet documentation: <https://facebook.github.io/prophet/docs/quick_start.html#r-api>
+
